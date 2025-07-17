@@ -12,11 +12,12 @@ from io import open
 ARTIST_URL_WANGYI = 'http://music.163.com/api/v1/artist/'
 LYRIC_URL_WANGYI = 'https://music.163.com/api/song/lyric?id='
 
-XIMALAYA_SEARCH_BY_ALBUM = 'https://www.ximalaya.com/revision/search/main?core=album&kw='
-XIMALAYA_SEARCH_ARTIST = 'https://www.ximalaya.com/revision/search/main?core=user&kw='
+# 更新为新的API接口
+XIMALAYA_SEARCH_BY_ALBUM = 'https://www.ximalaya.com/revision/search?core=album&kw='
+XIMALAYA_SEARCH_ARTIST = 'https://www.ximalaya.com/revision/search?core=user&kw='
 XIMALAYA_ARTIST_ALBUM = 'https://www.ximalaya.com/revision/user/pub?uid='
 XIMALAYA_ARTIST_URL = 'https://www.ximalaya.com/revision/user/basic?uid='
-XIMALAYA_TRACK_URL = 'http://mobile.ximalaya.com/mobile/v1/album/track?albumId='
+XIMALAYA_TRACK_URL = 'http://mobwsa.ximalaya.com/mobile/playlist/album/page?albumId='
 XIMALAYA_ALBUM_INFO = 'https://www.ximalaya.com/revision/album/v1/simple?albumId='
 
 
@@ -56,8 +57,20 @@ headers = {
     'referer': 'https://y.qq.com/portal/playlist.html'
 }
 
+def ValidatePrefs():
+  """验证插件配置"""
+  pass
+
 def Start():
-  HTTP.CacheTime = CACHE_1WEEK
+  HTTP.CacheTime = CACHE_1HOUR
+  HTTP.Headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+  HTTP.Headers['Accept-Language'] = 'zh-CN,zh;q=0.9,en;q=0.8'
+  HTTP.Headers['Accept-Encoding'] = 'gzip, deflate, br'
+  HTTP.Headers['Accept'] = 'application/json, text/plain, */*'
+  HTTP.Headers['Cache-Control'] = 'no-cache'
+  HTTP.Headers['Pragma'] = 'no-cache'
+  HTTP.Headers['Referer'] = 'https://www.ximalaya.com/'
+  HTTP.Headers['Origin'] = 'https://www.ximalaya.com'
 
 # Change pinyin
 def multi_get_letter(str_input): 
@@ -70,7 +83,7 @@ def multi_get_letter(str_input):
       try: 
         unicode_str = str_input.decode('gbk') 
       except: 
-        print 'unknown coding'
+        print('unknown coding')
         return
   return_list = [] 
   #for one_unicode in unicode_str: 
@@ -232,7 +245,7 @@ def get_album_bonus(media_albums, artist_id):
         if bonus >= ARTIST_ALBUM_MAX_BONUS:
           break
   
-  except Exception, e:
+  except Exception as e:
     Log('Error applying album bonus: ' + str(e))
   if bonus > 0:
     Log('Applying album bonus of: ' + str(bonus))
@@ -875,32 +888,21 @@ def SearchArtists(artist, limit=10):
   except:
     a = artist.lower()
   Log(a)
-  url = XIMALAYA_SEARCH_ARTIST + String.Quote(a)
+  url = XIMALAYA_SEARCH_ARTIST + String.Quote(a) + '&page=1&rows=' + str(limit)
   Log(url)
   try: 
     response = GetJSON(url)
-    num = int(response['data']['user']['total'])
+    if response and response.get('ret') == 200:
+      artist_results = response['data']['result']['response']['docs']
+      artists = Listify(artist_results)
+      Log('搜索到的歌手数量：' + str(len(artists)))
+    else:
+      Log('Error retrieving artist search results: ' + str(response.get('msg', 'Unknown error')))
+      return artists
   except:
     Log('Error retrieving artist search results.')
     return artists
     
-  lim = min(limit,num)
-  Log('搜索到的歌手数量：')
-  Log(lim)
-  for i in range(lim):
-    try:
-      artist_results = response['data']['user']
-      artists = artists + Listify(artist_results['docs'])
-    except:
-      Log('Error retrieving artist search results.')
-  # Since LFM has lots of garbage artists that match garbage inputs, we'll only consider ones that have
-  # either a MusicBrainz ID or artwork.
-  #
-  #valid_artists = [a for a in artists if a['mbid'] or (len(a.get('image', [])) > 0 and a['image'][0].get('#text', None))]
-  #if len(artists) != len(valid_artists):
-  #  Log('Skipping artist results because they lacked artwork or MBID: %s' % ', '.join({a['name'] for a in artists}.difference({a['name'] for a in valid_artists})))
-
-  #return valid_artists
   return artists
 
 
@@ -916,15 +918,15 @@ def SearchAlbums(album, limit=10, legacy=False):
   except:
     a = album.lower()
   Log("专辑搜索内容" + a)
-  url = XIMALAYA_SEARCH_BY_ALBUM + String.Quote(a)
+  url = XIMALAYA_SEARCH_BY_ALBUM + String.Quote(a) + '&page=1&rows=' + str(limit)
   try:
     response = GetJSON(url)
-    if response.has_key('error'):
-      Log('搜索结果错误: ' + response['message'])
-      return albums
-    else:
-      album_results = response['data']['album']['docs']
+    if response and response.get('ret') == 200:
+      album_results = response['data']['result']['response']['docs']
       albums = Listify(album_results)
+    else:
+      Log('搜索结果错误: ' + str(response.get('msg', 'Unknown error')))
+      return albums
   except:
     Log('Error retrieving album search results.')
 
@@ -936,9 +938,13 @@ def GetAlbumsByArtist(artist_id, limit=ARTIST_ALBUMS_LIMIT*4,albums=[], legacy=T
   url = XIMALAYA_ARTIST_ALBUM + artist_id
   response = GetJSON(url)
   try:
-    albums.extend(Listify(response['data']['albumList']))
+    if response and response.get('ret') == 200:
+      albums.extend(Listify(response['data']['albumList']))
+    else:
+      Log('Error retrieving artist albums: ' + str(response.get('msg', 'Unknown error')))
   except:
     # Sometimes the API will lie and say there's an Nth page of results, but the last one will return garbage.
+    Log('Exception getting artist albums.')
     pass
   return albums
 
@@ -947,10 +953,11 @@ def GetArtist(id, lang='en'):
   url = XIMALAYA_ARTIST_URL + id
   try:
     artist_results = GetJSON(url)
-    if artist_results.has_key('error'):
-      Log('Error retrieving artist metadata: ' + artist_results['message'])
+    if artist_results and artist_results.get('ret') == 200:
+      return artist_results['data']
+    else:
+      Log('Error retrieving artist metadata: ' + str(artist_results.get('msg', 'Unknown error')))
       return {}
-    return artist_results['data']
   except:
     Log('Error retrieving artist metadata.')
     return {}
@@ -960,23 +967,40 @@ def GetAlbum(album_id, lang='en'):
   url = XIMALAYA_ALBUM_INFO + album_id
   try:
     album_results = GetJSON(url)
-    if album_results.has_key('error'):
-      Log('Error retrieving album metadata: ' + album_results['msg'])
+    if album_results and album_results.get('ret') == 200:
+      return album_results['data']['albumPageMainInfo']
+    else:
+      Log('Error retrieving album metadata: ' + str(album_results.get('msg', 'Unknown error')))
       return {}
-    return album_results['data']['albumPageMainInfo']
   except:
     Log('Error retrieving album metadata.')
     return {}
 
 
 def GetTracks(artist_id, album_id, lang='en'):
-  url = XIMALAYA_TRACK_URL + album_id + '&pageId=1&pageSize=50' #每页最多显示200项
-  try:
-    tracks_result = GetJSON(url)
-    return tracks_result['data']['totalCount'], Listify(tracks_result['data']['list'])  #返回音轨总数和音轨详情
-  except:
-    Log('Error retrieving tracks.')
-    return '0',[]
+  all_tracks = []
+  page = 1
+  total_count = 0
+  
+  while True:
+    url = XIMALAYA_TRACK_URL + album_id + '&pageId=' + str(page) + '&pageSize=50'
+    try:
+      tracks_result = GetJSON(url)
+      if tracks_result and tracks_result.get('ret') == 0:
+        track_list = tracks_result['data']['list']
+        if not track_list:
+          break  # 没有更多数据
+        all_tracks.extend(Listify(track_list))
+        total_count = tracks_result['data']['totalCount']
+        page += 1
+      else:
+        Log('Error retrieving tracks: ' + str(tracks_result.get('msg', 'Unknown error')))
+        break
+    except:
+      Log('Error retrieving tracks.')
+      break
+  
+  return str(total_count), all_tracks
 
 
 def GetArtistTopTracks(artist_id, lang='en'):
@@ -1021,13 +1045,19 @@ def GetArtistSimilar(artist_id, lang='en'):
 
 
 def GetJSON(url, sleep_time=QUERY_SLEEP_TIME, cache_time=CACHE_1MONTH):
+  """获取JSON数据的通用函数"""
   d = None
   try:
-    d = JSON.ObjectFromURL(url, sleep=sleep_time, cacheTime=cache_time, headers=headers)
+    Log('Fetching URL: ' + url)
+    d = JSON.ObjectFromURL(url, sleep=sleep_time, cacheTime=cache_time)
     if isinstance(d, dict):
+      Log('Successfully fetched JSON data')
       return d
-  except:
-    Log('Error fetching JSON.')
+    else:
+      Log('Invalid JSON response format')
+      return None
+  except Exception as e:
+    Log('Error fetching JSON from URL: ' + url + ', Error: ' + str(e))
     return None
 
 
