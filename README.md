@@ -44,7 +44,7 @@
 
 ## 安装方法
 
-1. 将整个 `Ximalaya.bundle` 文件夹复制到 Plex Media Server 的插件目录
+1. 将整个 `Ximalaya.bundle` 文件夹复制到 Plex Media Server 的插件目录/Library/Application Support/Plex Media Server/Plug-ins/
 2. 重启 Plex Media Server
 3. 在 Plex 设置中启用该代理插件
 
